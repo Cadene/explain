@@ -80,3 +80,42 @@ def explain_img(
         n_best_segments=n_best_segments)
 
     return masked_segments
+
+def explain_bag_feats(
+        bag_feats,
+        scoring_fn,
+        segmentation_fn,
+        distance_fn,
+        kernel_fn,
+        class_id,
+        n_best_segments=5,
+        batch_tf=None,
+        bsize=10,
+        n_samples=1000,
+        segment_color='black'):
+
+    segments = np.array(range(bag_feats.shape[0]))
+
+    masks, targets, features = sample_around_bag_feats(
+        bag_feats,
+        segments,
+        scoring_fn,
+        n_samples,
+        bsize=bsize,
+        segment_color=segment_color,
+        force_full_img=True)
+
+    scores = score_segments(
+        masks,
+        targets,
+        features,
+        distance_fn,
+        kernel_fn,
+        class_id)
+
+    masked_segments = make_masked_segments(
+        scores,
+        segments,
+        n_best_segments=n_best_segments)
+
+    return masked_segments

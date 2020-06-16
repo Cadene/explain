@@ -203,3 +203,81 @@ def sample_around_img(
     targets = np.stack(targets)
     features = np.stack(features)
     return masks, targets, features
+
+
+def sample_around_bag_feats(
+        bag_feats,
+        segments,
+        scoring_fn,
+        n_samples,
+        batch_tf=None,
+        bsize=10,
+        segment_color='fudge',
+        has_anchor=None,
+        force_full_img=False,
+        force_anchor=False,
+        state_scores=None):
+    if state_scores is None:
+        state_scores = {}
+
+    n_segments = np.unique(segments).shape[0]
+
+    # make random masks in the segmentation space
+    masks = np.random.randint(0, 2, n_samples * n_segments)
+    masks = masks.reshape((n_samples, n_segments))
+
+    if has_anchor is not None:
+        masks[:, has_anchor == 1] = 1
+
+    if force_full_img:
+        idx_full_img = 0
+        masks[idx_full_img, :] = 1 # force first mask to be the full image
+
+    if force_anchor:
+        assert has_anchor is not None
+        idx_anchor = 1 if force_full_img else 0
+        masks[idx_anchor] = has_anchor
+
+    # associate a color to a segment
+    # by default, the mean color of the segment
+    if segment_color == 'black':
+        segment_color_bfeats = bag_feats.copy()
+        segment_color_bfeats[:] = 0
+    else:
+        raise ValueError(segment_color)
+
+    targets = [] # used as label in K-Lasso
+    features = [] # to calculate similarity with original img
+    masked_bfeats = []
+    for i,row in enumerate(masks):
+        row_str = row.tostring()
+        if row_str in state_scores:
+            saved_score = state_scores[row_str]
+            targets.extend(saved_score['target'])
+            features.extend(saved_score['feat'])
+            continue
+
+        # make masked img using the color of each segment
+        zeros = np.where(row == 0)[0]
+        mask = np.zeros(segments.shape).astype(bool)
+        for z in zeros:
+            mask[segments == z] = True
+        masked_bf = bag_feats.copy()
+        masked_bf[mask] = segment_color_bfeats[mask]
+        masked_bfeats.append(masked_bf)
+
+        last_loop = (i == n_samples-1)
+        if last_loop or len(masked_bfeats) == bsize:
+            if batch_tf is not None:
+                masked_bfeats = batch_tf(masked_bfeats)
+            target, feat = scoring_fn(masked_bfeats)
+            targets.extend(target)
+            features.extend(feat)
+            state_scores[row_str] = {
+                'target': target,
+                'feat': feat}
+            masked_bfeats = []
+
+    targets = np.stack(targets)
+    features = np.stack(features)
+    return masks, targets, features
